@@ -1,64 +1,91 @@
 import pandas as pd
 import numpy as np
-import pdb
 from sklearn.feature_extraction.text import CountVectorizer
-from sklearn.preprocessing import StandardScaler, MinMaxScaler
+from sklearn.preprocessing import StandardScaler
 from xgboost import XGBRegressor
 
-# df = pd.read_csv("imdb-tv-ratings/top-250-movie-ratings.csv")
-# df['Label'] = np.nan
-# df.to_csv("imdb-tv-ratings/top-250-movie-ratings-label.csv")
-use_val_set = True
-model_option = ["XGB", "NN", "SVR", "RF", "RULE_BASED", "LR", "PR"][0]
-df = pd.read_csv("data/imdb-tv-ratings/top-250-movie-ratings-label.csv")
+def load_data(file_path):
+    """Load data from CSV file."""
+    return pd.read_csv(file_path)
 
-X_train, y_train, X_val, y_val, X_test = [], [], [], [], []
-cols = ["Title", "Year", "Rating", "Rating Count"]
-cv = CountVectorizer()
+def preprocess_data(df):
+    """Preprocess the data."""
+    df['Year'] = df['Year'].astype(float)
+    df['Rating'] = df['Rating'].astype(float)
+    df['Rating Count'] = df['Rating Count'].str.replace(",", "").astype(float)
+    return df
 
-for i in range(len(df)):
-    print(df.at[i, "Label"], df.at[i, "Label"] == np.nan)
+def split_data(df):
+    """Split data into train and test sets."""
+    train_data = df[df['Label'].notnull()]
+    test_data = df[df['Label'].isnull()]
+    return train_data, test_data
 
-    datapoint = [df.at[i, col] for col in cols]
-    datapoint[1] = float(datapoint[1])
-    datapoint[2] = float(datapoint[2])
-    no_comma_number = datapoint[3].replace(",", "")
-    datapoint[3] = float(no_comma_number)
+def vectorize_text(train_texts, test_texts):
+    """Vectorize text data."""
+    cv = CountVectorizer()
+    train_texts = cv.fit_transform(train_texts)
+    test_texts = cv.transform(test_texts)
+    return train_texts, test_texts
 
-    if pd.isna(df.at[i, "Label"]):
-        X_test.append(datapoint)
-    else:
-        X_train.append(datapoint)
-        y_train.append(df.at[i, "Label"])
+def scale_features(X_train, X_test):
+    """Scale numerical features."""
+    scaler = StandardScaler()
+    X_train = scaler.fit_transform(X_train)
+    X_test = scaler.transform(X_test)
+    return X_train, X_test, scaler
 
+def scale_labels(y_train):
+    """Scale labels."""
+    label_scaler = StandardScaler()
+    y_train = label_scaler.fit_transform(y_train.reshape(-1, 1)).flatten()
+    return y_train, label_scaler
 
-train_texts = [elem[0].lower() for elem in X_train]
-test_texts = [elem[0].lower() for elem in X_test]
+def train_model(X_train, y_train):
+    """Train the XGBoost model."""
+    classifier = XGBRegressor()
+    classifier.fit(X_train, y_train)
+    return classifier
 
-print(len(train_texts), len(test_texts))
-train_texts = cv.fit_transform(train_texts)
-test_texts = cv.transform(test_texts)
+def predict(model, X_test, label_scaler):
+    """Predict movie views using the trained model."""
+    y_pred = model.predict(X_test)
+    y_test = label_scaler.inverse_transform(y_pred)
+    return y_test
 
-X_train = [X[1:] for X in X_train]
-X_test = [X[1:] for X in X_test]
+def main():
+    # Load data
+    df = load_data("data/imdb-tv-ratings/top-250-movie-ratings-label.csv")
+    
+    # Preprocess data
+    df = preprocess_data(df)
+    
+    # Split data
+    train_data, test_data = split_data(df)
+    
+    # Extract features and labels
+    train_texts = train_data['Title'].str.lower()
+    test_texts = test_data['Title'].str.lower()
+    X_train = train_data[['Year', 'Rating', 'Rating Count']]
+    y_train = train_data['Label'].values
+    
+    # Vectorize text data
+    X_train_text, X_test_text = vectorize_text(train_texts, test_texts)
+    
+    # Scale numerical features
+    X_train_scaled, X_test_scaled, scaler = scale_features(X_train, test_data[['Year', 'Rating', 'Rating Count']])
+    
+    # Scale labels
+    y_train_scaled, label_scaler = scale_labels(y_train)
+    
+    # Train the model
+    model = train_model(X_train_scaled, y_train_scaled)
+    
+    # Make predictions
+    predictions = predict(model, X_test_scaled, label_scaler)
+    
+    # Output predictions
+    print(predictions)
 
-scaler = StandardScaler()
-
-print(len(X_test))
-X_train = scaler.fit_transform(X_train)
-X_test = scaler.transform(X_test)
-
-label_scaler = StandardScaler()
-
-y_train = [y_train]
-y_train = label_scaler.fit_transform(y_train)[0]
-
-classifier = XGBRegressor()
-
-classifier.fit(X_train, y_train)
-
-y_pred = classifier.predict(X_test)
-y_test = np.zeros(y_pred.shape)
-for i in range(0, len(y_pred) - len(y_pred) % len(y_train), len(y_train)):
-    y_test[i: min(len(y_pred), i + len(y_train))] = label_scaler.inverse_transform(y_pred[i: min(len(y_pred), i + len(y_train))])
-
+if __name__ == "__main__":
+    main()
